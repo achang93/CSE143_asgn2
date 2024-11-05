@@ -26,7 +26,6 @@ def build_vocab(tokens, min_count=3):
 
     # Add <STOP> token explicitly to the vocabulary
     vocab['<STOP>'] = 1
-    print(f"Vocabulary has {len(vocab)} unique tokens, including <UNK> and <STOP>")
 
     return vocab
 
@@ -41,7 +40,6 @@ def replace_oov_tokens(tokens, vocab):
         else:
             updated_tokens.append('<UNK>')
             replaced_tokens += 1
-    print(f"Replaced {replaced_tokens} OOV tokens with <UNK>")
     return updated_tokens
 
 
@@ -126,15 +124,14 @@ def main():
 
     print(f"Total unique tokens in the vocabulary: {len(vocab)}")
 
-    print("Building unigram, bigram, and trigram models...")
     unigram_model, total_tokens = build_unigram_model(train_tokens)
     bigram_model, unigram_counts = build_bigram_model(train_tokens)
     trigram_model, bigram_counts = build_trigram_model(train_tokens)
 
     print("Calculating perplexities...")
     unigram_perplexity = calculate_perplexity(unigram_model, test_tokens, ngram_type="unigram")
-    bigram_perplexity = calculate_perplexity(None, test_tokens, ngram_type="bigram", bigram_model=bigram_model)
-    trigram_perplexity = calculate_perplexity(None, test_tokens, ngram_type="trigram", trigram_model=trigram_model)
+    bigram_perplexity = calculate_perplexity(bigram_model, test_tokens, ngram_type="bigram", bigram_model=bigram_model)
+    trigram_perplexity = calculate_perplexity(trigram_model, test_tokens, ngram_type="trigram", trigram_model=trigram_model)
 
     print(f"Unigram Perplexity: {unigram_perplexity}")
     print(f"Bigram Perplexity: {bigram_perplexity}")
