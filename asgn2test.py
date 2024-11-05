@@ -71,6 +71,37 @@ def build_trigram_model(tokens):
     return trigram_model, bigram_counts
 
 
+#implementing additive smoothing for unigram, bigram, and trigram models
+def build_unigram_smooth_model(tokens, alpha=1):
+    """ Build a unigram model based on the tokenized training data. """
+    unigram_counts = collections.Counter(tokens)
+    total_tokens = sum(unigram_counts.values()) + alpha * len(set(tokens))
+    unigram_model = {word: (count + alpha) / total_tokens for word, count in unigram_counts.items()}
+    return unigram_model, total_tokens
+
+
+def build_bigram_smooth_model(tokens, alpha=1):
+    """ Build a bigram model based on the tokenized training data. """
+    bigram_counts = collections.Counter(zip(tokens[:-1], tokens[1:]))
+    unigram_counts = collections.Counter(tokens)
+    vocabulary = len(set(tokens))
+    bigram_model = {
+        (w1, w2): (count + alpha) / (unigram_counts[w1] + alpha*vocabulary) for (w1, w2), count in bigram_counts.items()
+    }
+    return bigram_model, unigram_counts
+
+
+def build_trigram_smooth_model(tokens, alpha=1):
+    """ Build a trigram model based on the tokenized training data. """
+    trigram_counts = collections.Counter(zip(tokens[:-2], tokens[1:-1], tokens[2:]))
+    bigram_counts = collections.Counter(zip(tokens[:-1], tokens[1:]))
+    vocabulary = len(set(tokens))
+    trigram_model = {
+        (w1, w2, w3): (count + alpha) / (bigram_counts[(w1, w2)] + alpha*vocabulary) for (w1, w2, w3), count in trigram_counts.items()
+    }
+    return trigram_model, bigram_counts
+
+
 def calculate_perplexity(model, tokens, ngram_type="unigram", bigram_model=None, trigram_model=None):
     """ Calculate perplexity of a given model on a test set. """
     total_log_likelihood = 0
@@ -136,6 +167,21 @@ def main():
     print(f"Unigram Perplexity: {unigram_perplexity}")
     print(f"Bigram Perplexity: {bigram_perplexity}")
     print(f"Trigram Perplexity: {trigram_perplexity}")
+
+    
+    #Building unigram, bigram, and trigram models with additive smoothing
+    unigram_smooth_model, total_tokens = build_unigram_smooth_model(train_tokens, 4)
+    bigram_smooth_model, unigram_counts = build_bigram_smooth_model(train_tokens, 4)
+    trigram_smooth_model, bigram_counts = build_trigram_smooth_model(train_tokens, 4)
+
+    print("Calculate perplexities with additive smoothing")
+    unigram_smooth_perplexity = calculate_perplexity(unigram_smooth_model, test_tokens, ngram_type="unigram")
+    bigram_smooth_perplexity = calculate_perplexity(bigram_smooth_model, test_tokens, ngram_type="bigram", bigram_model=bigram_smooth_model)
+    trigram_smooth_perplexity = calculate_perplexity(trigram_smooth_model, test_tokens, ngram_type="trigram", trigram_model=trigram_smooth_model)
+
+    print(f"Unigram Additive Smoothing Perplexity: {unigram_smooth_perplexity}")
+    print(f"Bigram Additive Smoothing Perplexity: {bigram_smooth_perplexity}")
+    print(f"Trigram Additive Smoothing Perplexity: {trigram_smooth_perplexity}")
 
 if __name__ == "__main__":
     main()
