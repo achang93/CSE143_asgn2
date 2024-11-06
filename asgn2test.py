@@ -8,14 +8,17 @@ def preprocess(data_file, min_freq=3):
         sentences = [line.strip().split() for line in f]
 
     tokens = [token for sentence in sentences for token in sentence]
-    token_counts = collections.Counter( tokens)
-
+    token_counts = collections.Counter(tokens)
+    token_counts["<UNK>"] = 0
+    token_counts["<STOP>"] = 0
     print(f"Number of unique tokens in {data_file}: {len(token_counts)}")
 
     for sentence in sentences:
         for i, token in enumerate(sentence):
             if token_counts[token] < min_freq:
                 sentence[i] = "<UNK>"
+                token_counts["<UNK>"] += 1
+        token_counts["<STOP>"] += 1
 
     sentences = [["<START>"] + sentence + ["<STOP>"] for sentence in sentences]
 
@@ -25,7 +28,9 @@ def preprocess(data_file, min_freq=3):
 def build_unigram_model(tokens):
     """ Build a unigram model based on the tokenized training data. """
     unigram_counts = collections.Counter(tokens)
-    total_tokens = sum(unigram_counts.values())
+    total_tokens = 0
+    for item in unigram_counts:
+        total_tokens += unigram_counts[item]
     unigram_model = {word: count / total_tokens for word, count in unigram_counts.items()}
     return unigram_model, total_tokens
 
@@ -102,41 +107,56 @@ def build_smooth_interpol(tokens, l1 = 0.1, l2 = 0.3, l3 = 0.6):
         interpol_model[(tokens[i-2], tokens[i-1], tokens[i])] = total
     return interpol_model
 
-def calculate_perplexity(model, tokens, ngram_type="unigram", bigram_model=None, trigram_model=None):
+def calculate_perplexity(model, tokens, vocab, ngram_type="unigram", unigram_model = None, bigram_model=None, trigram_model=None):
     """ Calculate perplexity of a given model on a test set. """
     total_log_likelihood = 0
     word_count = 0
-
     if ngram_type == "unigram":
         for token in tokens:
+            if token == "<START>":
+                continue
+            if token not in vocab:
+                token = "<UNK>"
             prob = model.get(token, 0)  # If token is <UNK>, it will be 0 or use some smoothing
             if prob > 0:
-                total_log_likelihood += math.log(prob)
+                total_log_likelihood += math.log(prob, 2)
             word_count += 1
 
     elif ngram_type == "bigram":
         # For bigram model, iterate over each token from the second token onward
         for i in range(1, len(tokens)):
-            prev_token = tokens[i - 1]
-            current_token = tokens[i]
-            prob = bigram_model.get((prev_token, current_token), 0)
+            if tokens[i] == "<START>":
+                continue
+            prev_token = "<UNK>" if tokens[i - 1] not in vocab else tokens[i-1]
+            current_token = "<UNK>" if tokens[i] not in vocab else tokens[i]
+            if prev_token == "<START>":
+                prob = unigram_model.get(current_token, 0)
+            else:
+                prob = bigram_model.get((prev_token, current_token), 0)
             if prob > 0:
-                total_log_likelihood += math.log(prob)
+                total_log_likelihood += math.log(prob, 2)
             word_count += 1
 
     elif ngram_type == "trigram":
         # For trigram model, iterate over each token from the third token onward
         for i in range(2, len(tokens)):
-            prev_prev_token = tokens[i - 2]
-            prev_token = tokens[i - 1]
-            current_token = tokens[i]
-            prob = trigram_model.get((prev_prev_token, prev_token, current_token), 0)
+            if tokens[i] == "<START>":
+                continue
+            prev_prev_token = "<UNK>" if tokens[i - 2] not in vocab else tokens[i-2]
+            prev_token = "<UNK>" if tokens[i - 1] not in vocab else tokens[i-1]
+            current_token = "<UNK>" if tokens[i] not in vocab else tokens[i]
+            if prev_prev_token == "<START>":
+                prob = bigram_model.get((prev_token, current_token), 0)
+            elif prev_token == "<START>":
+                prob = unigram_model.get(current_token, 0)
+            else:
+                prob = trigram_model.get((prev_prev_token, prev_token, current_token), 0)
             if prob > 0:
-                total_log_likelihood += math.log(prob)
+                total_log_likelihood += math.log(prob, 2)
             word_count += 1
 
     # Calculate perplexity
-    perplexity = math.exp(-total_log_likelihood / word_count)
+    perplexity = 2 ** (-1 * total_log_likelihood / word_count)
     return perplexity
 
 
@@ -149,10 +169,8 @@ def main():
     train_sentences, train_token_counts = preprocess(train_file, min_freq=3)
     test_sentences, test_token_counts = preprocess(test_file, min_freq=3)
     dev_sentences, dev_token_counts = preprocess(dev_file, min_freq=3)
-
     # Build vocabulary using the token counts (from preprocessing)
     vocab = {token for token, count in train_token_counts.items() if count >= 3}
-    
     # Add <UNK> to the vocabulary for rare words
     vocab.add("<UNK>")
     vocab.add("<STOP>")  # Explicitly add <STOP> token
@@ -170,9 +188,9 @@ def main():
     print(f"Total unique tokens in the training vocabulary: {len(vocab)}")
 
     print("Calculating perplexities...")
-    unigram_perplexity = calculate_perplexity(unigram_model, test_tokens, ngram_type="unigram")
-    bigram_perplexity = calculate_perplexity(bigram_model, test_tokens, ngram_type="bigram", bigram_model=bigram_model)
-    trigram_perplexity = calculate_perplexity(trigram_model, test_tokens, ngram_type="trigram", trigram_model=trigram_model)
+    unigram_perplexity = calculate_perplexity(unigram_model, test_tokens, vocab, ngram_type="unigram")
+    bigram_perplexity = calculate_perplexity(bigram_model, test_tokens, vocab, ngram_type="bigram", bigram_model=bigram_model)
+    trigram_perplexity = calculate_perplexity(trigram_model, test_tokens, vocab, ngram_type="trigram", trigram_model=trigram_model)
 
     print(f"Unigram Perplexity: {unigram_perplexity}")
     print(f"Bigram Perplexity: {bigram_perplexity}")
@@ -184,15 +202,17 @@ def main():
     trigram_smooth_model, bigram_counts = build_trigram_smooth_model(train_tokens, 4)
 
     print("Calculate perplexities with additive smoothing")
-    unigram_smooth_perplexity = calculate_perplexity(unigram_smooth_model, test_tokens, ngram_type="unigram")
-    bigram_smooth_perplexity = calculate_perplexity(bigram_smooth_model, test_tokens, ngram_type="bigram", bigram_model=bigram_smooth_model)
-    trigram_smooth_perplexity = calculate_perplexity(trigram_smooth_model, test_tokens, ngram_type="trigram", trigram_model=trigram_smooth_model)
+    unigram_smooth_perplexity = calculate_perplexity(unigram_smooth_model, test_tokens, vocab,ngram_type="unigram")
+    bigram_smooth_perplexity = calculate_perplexity(bigram_smooth_model, test_tokens, vocab,ngram_type="bigram", bigram_model=bigram_smooth_model)
+    trigram_smooth_perplexity = calculate_perplexity(trigram_smooth_model, test_tokens, vocab,ngram_type="trigram", trigram_model=trigram_smooth_model)
 
     print(f"Unigram Additive Smoothing Perplexity: {unigram_smooth_perplexity}")
     print(f"Bigram Additive Smoothing Perplexity: {bigram_smooth_perplexity}")
     print(f"Trigram Additive Smoothing Perplexity: {trigram_smooth_perplexity}")
+    
+    print(f"Calculate perplexities for linear interpolation of n-gram models")
     interpol_model = build_smooth_interpol(train_tokens)
-    interpol_perplexity = calculate_perplexity(interpol_model, test_tokens, ngram_type = "trigram", trigram_model = interpol_model)
+    interpol_perplexity = calculate_perplexity(interpol_model, test_tokens, vocab,ngram_type = "trigram", trigram_model = interpol_model)
     print(f"Interpolation Perplexity: {interpol_perplexity}")
 
 if __name__ == "__main__":
