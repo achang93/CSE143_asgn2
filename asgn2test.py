@@ -80,6 +80,27 @@ def build_trigram_smooth_model(tokens, alpha=1):
     }
     return trigram_model, bigram_counts
 
+def build_smooth_interpol(tokens, l1 = 0.1, l2 = 0.3, l3 = 0.6):
+    """ Build a model with interpolation. """
+    unigram_model, total_tokens = build_unigram_model(tokens)
+    bigram_model, unigram_counts = build_bigram_model(tokens)
+    trigram_model, bigram_counts = build_trigram_model(tokens)
+    interpol_model = {}
+    for i in range(len(tokens)):
+        unigramProb = unigram_model.get(tokens[i], 0)
+        if i <= 0:
+            bigramProb = 0
+        else:
+            bigramProb = bigram_model.get((tokens[i-1], tokens[i]), 0)
+        if i <= 1:
+            trigramProb = 0
+        else:
+            trigramProb = trigram_model.get((tokens[i-2], tokens[i-1], tokens[i]), 0)
+        total = l1 * unigramProb + l2 * bigramProb + l3 * trigramProb
+        if total == 0:
+            continue
+        interpol_model[(tokens[i-2], tokens[i-1], tokens[i])] = total
+    return interpol_model
 
 def calculate_perplexity(model, tokens, ngram_type="unigram", bigram_model=None, trigram_model=None):
     """ Calculate perplexity of a given model on a test set. """
@@ -170,7 +191,9 @@ def main():
     print(f"Unigram Additive Smoothing Perplexity: {unigram_smooth_perplexity}")
     print(f"Bigram Additive Smoothing Perplexity: {bigram_smooth_perplexity}")
     print(f"Trigram Additive Smoothing Perplexity: {trigram_smooth_perplexity}")
-
+    interpol_model = build_smooth_interpol(train_tokens)
+    interpol_perplexity = calculate_perplexity(interpol_model, test_tokens, ngram_type = "trigram", trigram_model = interpol_model)
+    print(f"Interpolation Perplexity: {interpol_perplexity}")
 
 if __name__ == "__main__":
     main()
