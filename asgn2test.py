@@ -2,45 +2,38 @@ import collections
 import re
 import math
 
+def preprocess(data_file, min_freq=3):
+    """
+    Preprocesses the data from a .tokens file to handle the <UNK> token and adds <START> and <STOP> tokens.
+    Args:
+    - data_file: path to the .tokens file
+    - min_freq: minimum frequency threshold for replacing tokens with <UNK>
 
-def preprocess_text(filename):
-    """ Reads the file and tokenizes it, returning a list of tokens. """
-    with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
-        text = f.read().lower()
-    tokens = re.findall(r'\b\w+\b', text)
-    return tokens
+    Returns:
+    - sentences: list of tokenized sentences with <START>, <STOP>, and <UNK> replacements
+    - token_counts: Counter object containing the frequency of each token
+    """
+    with open(data_file, 'r', encoding='utf-8', errors='ignore') as f:
+        # Read the data from the file and directly use the tokenized sentences
+        sentences = [line.strip().split() for line in f]
 
+    # Flatten the list of sentences to count token frequencies
+    flat_tokens = [token for sentence in sentences for token in sentence]
+    token_counts = collections.Counter(flat_tokens)
 
-def build_vocab(tokens, min_count=3):
-    """ Build vocabulary where any token that occurs fewer than `min_count` times
-        is replaced with <UNK>. """
-    # Count token frequencies in the training data
-    token_counts = collections.Counter(tokens)
+    # Print the number of unique tokens
+    print(f"Number of unique tokens in {data_file}: {len(token_counts)}")
 
-    vocab = {}
-    for token, count in token_counts.items():
-        if count >= min_count:
-            vocab[token] = count
-        else:
-            vocab['<UNK>'] = vocab.get('<UNK>', 0) + count
+    # Replace words that occur less than `min_freq` with <UNK>
+    for sentence in sentences:
+        for i, token in enumerate(sentence):
+            if token_counts[token] < min_freq:
+                sentence[i] = "<UNK>"
 
-    # Add <STOP> token explicitly to the vocabulary
-    vocab['<STOP>'] = 1
+    # Add <START> and <STOP> tokens to each sentence
+    sentences = [["<START>"] + sentence + ["<STOP>"] for sentence in sentences]
 
-    return vocab
-
-
-def replace_oov_tokens(tokens, vocab):
-    """ Replace tokens not in vocab with <UNK> """
-    replaced_tokens = 0
-    updated_tokens = []
-    for token in tokens:
-        if token in vocab:
-            updated_tokens.append(token)
-        else:
-            updated_tokens.append('<UNK>')
-            replaced_tokens += 1
-    return updated_tokens
+    return sentences, token_counts
 
 
 def build_unigram_model(tokens):
@@ -71,9 +64,9 @@ def build_trigram_model(tokens):
     return trigram_model, bigram_counts
 
 
-#implementing additive smoothing for unigram, bigram, and trigram models
+# Implementing additive smoothing for unigram, bigram, and trigram models
 def build_unigram_smooth_model(tokens, alpha=1):
-    """ Build a unigram model based on the tokenized training data. """
+    """ Build a unigram model with additive smoothing. """
     unigram_counts = collections.Counter(tokens)
     total_tokens = sum(unigram_counts.values()) + alpha * len(set(tokens))
     unigram_model = {word: (count + alpha) / total_tokens for word, count in unigram_counts.items()}
@@ -81,23 +74,23 @@ def build_unigram_smooth_model(tokens, alpha=1):
 
 
 def build_bigram_smooth_model(tokens, alpha=1):
-    """ Build a bigram model based on the tokenized training data. """
+    """ Build a bigram model with additive smoothing. """
     bigram_counts = collections.Counter(zip(tokens[:-1], tokens[1:]))
     unigram_counts = collections.Counter(tokens)
     vocabulary = len(set(tokens))
     bigram_model = {
-        (w1, w2): (count + alpha) / (unigram_counts[w1] + alpha*vocabulary) for (w1, w2), count in bigram_counts.items()
+        (w1, w2): (count + alpha) / (unigram_counts[w1] + alpha * vocabulary) for (w1, w2), count in bigram_counts.items()
     }
     return bigram_model, unigram_counts
 
 
 def build_trigram_smooth_model(tokens, alpha=1):
-    """ Build a trigram model based on the tokenized training data. """
+    """ Build a trigram model with additive smoothing. """
     trigram_counts = collections.Counter(zip(tokens[:-2], tokens[1:-1], tokens[2:]))
     bigram_counts = collections.Counter(zip(tokens[:-1], tokens[1:]))
     vocabulary = len(set(tokens))
     trigram_model = {
-        (w1, w2, w3): (count + alpha) / (bigram_counts[(w1, w2)] + alpha*vocabulary) for (w1, w2, w3), count in trigram_counts.items()
+        (w1, w2, w3): (count + alpha) / (bigram_counts[(w1, w2)] + alpha * vocabulary) for (w1, w2, w3), count in trigram_counts.items()
     }
     return trigram_model, bigram_counts
 
@@ -141,47 +134,59 @@ def calculate_perplexity(model, tokens, ngram_type="unigram", bigram_model=None,
     perplexity = math.exp(-total_log_likelihood / word_count)
     return perplexity
 
+
 def main():
     train_file = '1b_benchmark.train.tokens'
     test_file = '1b_benchmark.test.tokens'
+    dev_file = '1b_benchmark.dev.tokens'
 
-    train_tokens = preprocess_text(train_file)
-    test_tokens = preprocess_text(test_file)
+    # Use the new preprocess function for both training and test data
+    train_sentences, train_token_counts = preprocess(train_file, min_freq=3)
+    test_sentences, test_token_counts = preprocess(test_file, min_freq=3)
+    dev_sentences, dev_token_counts = preprocess(dev_file, min_freq=3)
 
-    vocab = build_vocab(train_tokens, min_count=3)
+    # Build vocabulary using the token counts (from preprocessing)
+    vocab = {token for token, count in train_token_counts.items() if count >= 3}
+    
+    # Add <UNK> to the vocabulary for rare words
+    vocab.add("<UNK>")
+    vocab.add("<STOP>")  # Explicitly add <STOP> token
 
-    train_tokens = replace_oov_tokens(train_tokens, vocab)
-    test_tokens = replace_oov_tokens(test_tokens, vocab)
+    # Flatten the sentences again for processing
+    flat_train_tokens = [token for sentence in train_sentences for token in sentence]
+    flat_test_tokens = [token for sentence in test_sentences for token in sentence]
+    flat_dev_tokens = [token for sentence in dev_sentences for token in sentence]
 
-    print(f"Total unique tokens in the vocabulary: {len(vocab)}")
+    # Create unigram, bigram, and trigram models
+    unigram_model, total_tokens = build_unigram_model(flat_train_tokens)
+    bigram_model, unigram_counts = build_bigram_model(flat_train_tokens)
+    trigram_model, bigram_counts = build_trigram_model(flat_train_tokens)
 
-    unigram_model, total_tokens = build_unigram_model(train_tokens)
-    bigram_model, unigram_counts = build_bigram_model(train_tokens)
-    trigram_model, bigram_counts = build_trigram_model(train_tokens)
+    print(f"Total unique tokens in the training vocabulary: {len(vocab)}")
 
     print("Calculating perplexities...")
-    unigram_perplexity = calculate_perplexity(unigram_model, test_tokens, ngram_type="unigram")
-    bigram_perplexity = calculate_perplexity(bigram_model, test_tokens, ngram_type="bigram", bigram_model=bigram_model)
-    trigram_perplexity = calculate_perplexity(trigram_model, test_tokens, ngram_type="trigram", trigram_model=trigram_model)
+    unigram_perplexity = calculate_perplexity(unigram_model, flat_test_tokens, ngram_type="unigram")
+    bigram_perplexity = calculate_perplexity(bigram_model, flat_test_tokens, ngram_type="bigram", bigram_model=bigram_model)
+    trigram_perplexity = calculate_perplexity(trigram_model, flat_test_tokens, ngram_type="trigram", trigram_model=trigram_model)
 
     print(f"Unigram Perplexity: {unigram_perplexity}")
     print(f"Bigram Perplexity: {bigram_perplexity}")
     print(f"Trigram Perplexity: {trigram_perplexity}")
 
-    
-    #Building unigram, bigram, and trigram models with additive smoothing
-    unigram_smooth_model, total_tokens = build_unigram_smooth_model(train_tokens, 4)
-    bigram_smooth_model, unigram_counts = build_bigram_smooth_model(train_tokens, 4)
-    trigram_smooth_model, bigram_counts = build_trigram_smooth_model(train_tokens, 4)
+    # Building unigram, bigram, and trigram models with additive smoothing
+    unigram_smooth_model, total_tokens = build_unigram_smooth_model(flat_train_tokens, 4)
+    bigram_smooth_model, unigram_counts = build_bigram_smooth_model(flat_train_tokens, 4)
+    trigram_smooth_model, bigram_counts = build_trigram_smooth_model(flat_train_tokens, 4)
 
     print("Calculate perplexities with additive smoothing")
-    unigram_smooth_perplexity = calculate_perplexity(unigram_smooth_model, test_tokens, ngram_type="unigram")
-    bigram_smooth_perplexity = calculate_perplexity(bigram_smooth_model, test_tokens, ngram_type="bigram", bigram_model=bigram_smooth_model)
-    trigram_smooth_perplexity = calculate_perplexity(trigram_smooth_model, test_tokens, ngram_type="trigram", trigram_model=trigram_smooth_model)
+    unigram_smooth_perplexity = calculate_perplexity(unigram_smooth_model, flat_test_tokens, ngram_type="unigram")
+    bigram_smooth_perplexity = calculate_perplexity(bigram_smooth_model, flat_test_tokens, ngram_type="bigram", bigram_model=bigram_smooth_model)
+    trigram_smooth_perplexity = calculate_perplexity(trigram_smooth_model, flat_test_tokens, ngram_type="trigram", trigram_model=trigram_smooth_model)
 
     print(f"Unigram Additive Smoothing Perplexity: {unigram_smooth_perplexity}")
     print(f"Bigram Additive Smoothing Perplexity: {bigram_smooth_perplexity}")
     print(f"Trigram Additive Smoothing Perplexity: {trigram_smooth_perplexity}")
+
 
 if __name__ == "__main__":
     main()
