@@ -12,6 +12,7 @@ def preprocess(data_file, min_freq=3):
     # print(token_counts['.'], token_counts['HDTV'])
     token_counts["<UNK>"] = 0
     token_counts["<STOP>"] = 0
+    token_counts["<START>"] = 0
     print(f"Number of unique tokens in {data_file}: {len(token_counts)}")
     toRemove = set()
     for sentence in sentences:
@@ -21,6 +22,7 @@ def preprocess(data_file, min_freq=3):
                 token_counts["<UNK>"] += 1
                 toRemove.add(token)
         token_counts["<STOP>"] += 1
+        token_counts["<START>"] += 1
     for item in toRemove:
         del token_counts[item]
     sentences = [["<START>"] + sentence + ["<STOP>"] for sentence in sentences]
@@ -48,7 +50,8 @@ def build_unigram_model(tokens):
     unigram_counts = collections.Counter(tokens)
     total_tokens = 0
     for item in unigram_counts:
-        total_tokens += unigram_counts[item]
+        if item != "<START>":
+            total_tokens += unigram_counts[item]
     unigram_model = {word: count / total_tokens for word, count in unigram_counts.items()}
     return unigram_model, total_tokens
 
@@ -67,9 +70,9 @@ def build_trigram_model(tokens):
     """ Build a trigram model based on the tokenized training data. """
     trigram_counts = collections.Counter(zip(tokens[:-2], tokens[1:-1], tokens[2:]))
     bigram_counts = collections.Counter(zip(tokens[:-1], tokens[1:]))
-    trigram_model = {
-        (w1, w2, w3): count / bigram_counts[(w1, w2)] for (w1, w2, w3), count in trigram_counts.items()
-    }
+    trigram_model= {}
+    for (w1,w2,w3), count in trigram_counts.items():
+        trigram_model[(w1,w2,w3)] = count/bigram_counts[(w1,w2)]
     return trigram_model, bigram_counts
 
 
@@ -77,7 +80,11 @@ def build_trigram_model(tokens):
 def build_unigram_smooth_model(tokens, alpha=1):
     """ Build a unigram model with additive smoothing. """
     unigram_counts = collections.Counter(tokens)
-    total_tokens = sum(unigram_counts.values()) + alpha * len(set(tokens))
+    total_tokens = 0
+    for item in unigram_counts:
+        if item != "<START>":
+            total_tokens += unigram_counts[item]
+    total_tokens += alpha * len(set(tokens))
     unigram_model = {word: (count + alpha) / total_tokens for word, count in unigram_counts.items()}
     return unigram_model, total_tokens
 
@@ -142,28 +149,38 @@ def calculate_perplexity(model, tokens, vocab, ngram_type="unigram", unigram_mod
         for i in range(1, len(tokens)):
             if tokens[i] == "<START>":
                 continue
-            prev_token = "<UNK>" if tokens[i - 1] not in vocab else tokens[i-1]
-            current_token = "<UNK>" if tokens[i] not in vocab else tokens[i]
-            if prev_token == "<START>":
-                prob = unigram_model.get(current_token, 0)
-            else:
-                prob = bigram_model.get((prev_token, current_token), 0)
+            prev_token = tokens[i-1]
+            current_token = tokens[i]
+            # prev_token = "<UNK>" if tokens[i - 1] not in vocab else tokens[i-1]
+            # current_token = "<UNK>" if tokens[i] not in vocab else tokens[i]
+            # if prev_token == "<START>":
+            #     prob = unigram_model.get(current_token, 0)
+            # else:
+            prob = bigram_model.get((prev_token, current_token), 0)
             if prob > 0:
                 total_log_likelihood += math.log(prob, 2)
             word_count += 1
-
     elif ngram_type == "trigram":
+        print(trigram_model[("<START>", "HDTV", ".")])
+        print(trigram_model[("HDTV",".", "<STOP>")])
+        # print(trigram_model)
         # For trigram model, iterate over each token from the third token onward
         for i in range(2, len(tokens)):
             if tokens[i] == "<START>":
                 continue
-            prev_prev_token = "<UNK>" if tokens[i - 2] not in vocab else tokens[i-2]
-            prev_token = "<UNK>" if tokens[i - 1] not in vocab else tokens[i-1]
-            current_token = "<UNK>" if tokens[i] not in vocab else tokens[i]
-            if prev_prev_token == "<START>":
+            prev_prev_token = tokens[i-2]
+            prev_token = tokens[i-1]
+            current_token = tokens[i] 
+            # prev_prev_token = "<UNK>" if tokens[i - 2] not in vocab else tokens[i-2]
+            # prev_token = "<UNK>" if tokens[i - 1] not in vocab else tokens[i-1]
+            # current_token = "<UNK>" if tokens[i] not in vocab else tokens[i]
+            # if prev_prev_token == "<START>":
+            #     prob = bigram_model.get((prev_token, current_token), 0)
+            # elif prev_token == "<START>":
+            #     prob = unigram_model.get(current_token, 0)
+            # else:
+            if tokens[i-1] == "<START>":
                 prob = bigram_model.get((prev_token, current_token), 0)
-            elif prev_token == "<START>":
-                prob = unigram_model.get(current_token, 0)
             else:
                 prob = trigram_model.get((prev_prev_token, prev_token, current_token), 0)
             if prob > 0:
@@ -208,7 +225,7 @@ def main():
     print("Calculating perplexities...")
     unigram_perplexity = calculate_perplexity(unigram_model, test_tokens, vocab, ngram_type="unigram")
     bigram_perplexity = calculate_perplexity(bigram_model, test_tokens, vocab, ngram_type="bigram", bigram_model=bigram_model)
-    trigram_perplexity = calculate_perplexity(trigram_model, test_tokens, vocab, ngram_type="trigram", trigram_model=trigram_model)
+    trigram_perplexity = calculate_perplexity(trigram_model, test_tokens, vocab, ngram_type="trigram", bigram_model= bigram_model, trigram_model=trigram_model)
 
     print(f"Unigram Perplexity: {unigram_perplexity}")
     print(f"Bigram Perplexity: {bigram_perplexity}")
